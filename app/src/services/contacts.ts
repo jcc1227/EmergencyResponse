@@ -57,7 +57,7 @@ export async function addContact(contact: ContactRecord, userId?: string): Promi
       const res = await fetch(`${API_URL}/contacts/${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: contact.name, phone: contact.phone, isPrimary: contact.isPrimary }),
+        body: JSON.stringify({ name: contact.name, phone: contact.phone, isPrimary: contact.isPrimary, relationship: contact.relationship }),
       });
       if (res.ok) {
         const body = await res.json();

@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import API_URL from '../config/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface Props {
   onLogin: (email: string, token: string) => void;
@@ -91,6 +92,16 @@ export default function UserLogin({ onLogin }: Props) {
 
       if (!response.ok) {
         throw new Error(data.message || 'Login failed');
+      }
+
+      // Save userId locally for API calls
+      try {
+        if (data.user && (data.user.id || data.user._id)) {
+          const id = data.user.id || data.user._id;
+          await AsyncStorage.setItem('userId', id.toString());
+        }
+      } catch (e) {
+        // ignore
       }
 
       onLogin(data.user.email, data.token);

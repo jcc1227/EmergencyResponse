@@ -82,22 +82,29 @@ export default function UserDashboard({ email, onLogout }: Props) {
   const [alertHistory, setAlertHistory] = useState<AlertHistory[]>([]);
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
+  const [newContactRelationship, setNewContactRelationship] = useState<string | null>(null);
+  const [showRelationshipOptions, setShowRelationshipOptions] = useState(false);
   const [iotConnected, setIotConnected] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeAlert, setActiveAlert] = useState<ActiveAlert | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingUpdates, setPendingUpdates] = useState<any[]>([]);
   
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const gpsUpdateInterval = useRef<NodeJS.Timeout | null>(null);
   const statusPollInterval = useRef<NodeJS.Timeout | null>(null);
   const appState = useRef(AppState.currentState);
 
-  // Load user data and contacts from storage
+
+  // Load user data, contacts, and alert history from storage/server
   useEffect(() => {
     loadUserData();
     loadContacts();
     getLocation();
+    loadAlertHistoryFromStorage();
+    loadAlertHistoryFromServer();
 
     // App state listener
     const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -110,6 +117,20 @@ export default function UserDashboard({ email, onLogout }: Props) {
       }
     };
   }, []);
+
+  // Load alert history from AsyncStorage
+  const loadAlertHistoryFromStorage = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('alertHistory');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Convert timestamp strings to Date objects
+        setAlertHistory(parsed.map((a: any) => ({ ...a, timestamp: new Date(a.timestamp) })));
+      }
+    } catch (e) {
+      // Ignore
+    }
+  };
 
   // Start location tracking and status polling when there's an active alert
   useEffect(() => {
@@ -234,6 +255,66 @@ export default function UserDashboard({ email, onLogout }: Props) {
       setContacts(stored as Contact[]);
     } catch (error) {
       console.error('Error loading contacts:', error);
+    }
+  };
+
+  // Fetch alert history from the server
+  const loadAlertHistoryFromServer = async () => {
+    const storedUserId = await AsyncStorage.getItem('userId');
+    if (!storedUserId) return;
+
+    setIsLoadingHistory(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(`${API_URL}/alerts/user/${storedUserId}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.alerts && Array.isArray(data.alerts)) {
+          const formattedHistory: AlertHistory[] = data.alerts.map((item: any) => ({
+            id: item._id || item.id,
+            type: item.type,
+            timestamp: new Date(item.createdAt),
+            location: item.location?.address || 
+              `${item.location?.latitude?.toFixed(4)}, ${item.location?.longitude?.toFixed(4)}` || 
+              'Unknown location',
+            status: item.status === 'resolved' ? 'resolved' : 
+                   item.status === 'cancelled' ? 'cancelled' :
+                   item.status === 'responding' ? 'received' : 'sent',
+          }));
+          // Merge with local history, keeping all unique alerts
+          const localRaw = await AsyncStorage.getItem('alertHistory');
+          let localHistory: AlertHistory[] = [];
+          if (localRaw) {
+            try {
+              localHistory = JSON.parse(localRaw).map((a: any) => ({ ...a, timestamp: new Date(a.timestamp) }));
+            } catch {}
+          }
+          // Use id+timestamp to deduplicate
+          const allAlerts = [...formattedHistory, ...localHistory].reduce((acc: AlertHistory[], curr) => {
+            if (!acc.some(a => a.id === curr.id && a.timestamp.getTime() === curr.timestamp.getTime())) {
+              acc.push(curr);
+            }
+            return acc;
+          }, []);
+          // Sort by timestamp descending
+          allAlerts.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+          setAlertHistory(allAlerts);
+          await AsyncStorage.setItem('alertHistory', JSON.stringify(allAlerts));
+          setIsOnline(true);
+        }
+      }
+    } catch (error: any) {
+      console.log('Could not fetch alert history:', error.message);
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -372,6 +453,20 @@ export default function UserDashboard({ email, onLogout }: Props) {
     setIsSending(true);
     Vibration.vibrate(200);
 
+    // Always add alert to local history immediately
+    const localAlert: AlertHistory = {
+      id: Date.now().toString(),
+      type,
+      timestamp: new Date(),
+      location: location ? `${location.coords.latitude?.toFixed(4)}, ${location.coords.longitude?.toFixed(4)}` : 'Unknown',
+      status: 'sent',
+    };
+    setAlertHistory(prev => {
+      const updated = [localAlert, ...prev];
+      AsyncStorage.setItem('alertHistory', JSON.stringify(updated));
+      return updated;
+    });
+
     // Get fresh location
     await getLocation();
 
@@ -427,7 +522,11 @@ export default function UserDashboard({ email, onLogout }: Props) {
           location: location ? `${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}` : 'Unknown',
           status: 'sent',
         };
-        setAlertHistory(prev => [newAlert, ...prev]);
+        setAlertHistory(prev => {
+          const updated = [newAlert, ...prev];
+          AsyncStorage.setItem('alertHistory', JSON.stringify(updated));
+          return updated;
+        });
         setIsOnline(true);
 
         Alert.alert(
@@ -450,7 +549,11 @@ export default function UserDashboard({ email, onLogout }: Props) {
         location: location ? `${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}` : 'Unknown',
         status: 'sent',
       };
-      setAlertHistory(prev => [newAlert, ...prev]);
+      setAlertHistory(prev => {
+        const updated = [newAlert, ...prev];
+        AsyncStorage.setItem('alertHistory', JSON.stringify(updated));
+        return updated;
+      });
       
       Alert.alert(
         'Connection Error',
@@ -535,6 +638,7 @@ export default function UserDashboard({ email, onLogout }: Props) {
       name: newContactName.trim(),
       phone: newContactPhone.trim(),
       isPrimary: contacts.length === 0,
+      relationship: newContactRelationship || undefined,
     };
 
     const updatedContacts = [...contacts, newContact];
@@ -544,15 +648,23 @@ export default function UserDashboard({ email, onLogout }: Props) {
     // Also save to backend if userId exists
     if (userId) {
       try {
-        await fetch(`${API_URL}/contacts/${userId}`, {
+        const res = await fetch(`${API_URL}/contacts/${userId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: newContact.name,
             phone: newContact.phone,
             isPrimary: newContact.isPrimary,
+            relationship: newContact.relationship,
           }),
         });
+        if (res.ok) {
+          const body = await res.json();
+          if (body.contacts) {
+            setContacts(body.contacts as Contact[]);
+            await saveContacts(body.contacts as any);
+          }
+        }
       } catch (error) {
         console.error('Error saving contact to server:', error);
       }
@@ -560,10 +672,11 @@ export default function UserDashboard({ email, onLogout }: Props) {
     
     setNewContactName('');
     setNewContactPhone('');
+    setNewContactRelationship(null);
     Alert.alert('Success', 'Contact added successfully.');
   };
 
-  const deleteContact = async (id: string) => {
+  const handleDeleteContact = async (id: string) => {
     Alert.alert(
       'Delete Contact',
       'Are you sure you want to delete this contact?',
@@ -573,9 +686,15 @@ export default function UserDashboard({ email, onLogout }: Props) {
           text: 'Delete', 
           style: 'destructive',
           onPress: async () => {
-            const updatedContacts = contacts.filter(c => c.id !== id);
-            setContacts(updatedContacts);
-            await saveContacts(updatedContacts);
+            try {
+              const updatedContacts = await deleteContact(id, userId || undefined);
+              setContacts(updatedContacts as Contact[]);
+            } catch (err) {
+              // fallback local removal
+              const updatedContacts = contacts.filter(c => c.id !== id);
+              setContacts(updatedContacts);
+              await saveContacts(updatedContacts);
+            }
           }
         },
       ]
@@ -768,6 +887,23 @@ export default function UserDashboard({ email, onLogout }: Props) {
           keyboardType="phone-pad"
           placeholderTextColor="#9CA3AF"
         />
+        <TouchableOpacity
+          style={[styles.input, { justifyContent: 'center' }]}
+          onPress={() => setShowRelationshipOptions(prev => !prev)}
+        >
+          <Text style={{ color: newContactRelationship ? '#111827' : '#9CA3AF' }}>
+            {newContactRelationship || 'Select relationship'}
+          </Text>
+        </TouchableOpacity>
+        {showRelationshipOptions && (
+          <View style={styles.relationshipOptions}>
+            {['Family','Spouse','Parent','Sibling','Friend','Colleague','Other'].map(opt => (
+              <TouchableOpacity key={opt} onPress={() => { setNewContactRelationship(opt); setShowRelationshipOptions(false); }} style={styles.relationshipOption}>
+                <Text style={{ padding: 8 }}>{opt}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
         <TouchableOpacity style={styles.addButton} onPress={addContact}>
           <Ionicons name="add" size={20} color="#FFF" />
           <Text style={styles.addButtonText}>Add Contact</Text>
@@ -781,21 +917,22 @@ export default function UserDashboard({ email, onLogout }: Props) {
           <Text style={styles.emptyText}>No contacts added yet</Text>
         </View>
       ) : (
-        contacts.map((contact) => (
-          <View key={contact.id} style={styles.contactCard}>
+        contacts.map((contact, idx) => (
+          <View key={contact.id ?? `contact-${idx}`} style={styles.contactCard}>
             <View style={styles.contactAvatar}>
               <Text style={styles.contactInitial}>{contact.name[0].toUpperCase()}</Text>
             </View>
             <View style={styles.contactInfo}>
               <Text style={styles.contactName}>{contact.name}</Text>
               <Text style={styles.contactPhone}>{contact.phone}</Text>
+              {contact.relationship ? <Text style={styles.contactRelationship}>{contact.relationship}</Text> : null}
             </View>
             {contact.isPrimary && (
               <View style={styles.primaryBadge}>
                 <Text style={styles.primaryText}>Primary</Text>
               </View>
             )}
-            <TouchableOpacity onPress={() => deleteContact(contact.id)}>
+            <TouchableOpacity onPress={() => handleDeleteContact(contact.id)}>
               <Ionicons name="trash-outline" size={20} color="#DC2626" />
             </TouchableOpacity>
           </View>
@@ -806,16 +943,34 @@ export default function UserDashboard({ email, onLogout }: Props) {
 
   const renderHistoryTab = () => (
     <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Alert History</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Text style={styles.sectionTitle}>Alert History</Text>
+        <TouchableOpacity 
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#EFF6FF', borderRadius: 8 }}
+          onPress={loadAlertHistoryFromServer}
+          disabled={isLoadingHistory}
+        >
+          <Ionicons name="refresh" size={18} color={isLoadingHistory ? '#9CA3AF' : '#3B82F6'} />
+          <Text style={{ fontSize: 14, color: isLoadingHistory ? '#9CA3AF' : '#3B82F6', fontWeight: '500' }}>
+            {isLoadingHistory ? 'Loading...' : 'Refresh'}
+          </Text>
+        </TouchableOpacity>
+      </View>
       
-      {alertHistory.length === 0 ? (
+      {isLoadingHistory ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="hourglass-outline" size={48} color="#3B82F6" />
+          <Text style={styles.emptyText}>Loading alerts...</Text>
+        </View>
+      ) : alertHistory.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="time-outline" size={48} color="#D1D5DB" />
           <Text style={styles.emptyText}>No alerts sent yet</Text>
+          <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>Your alert history will appear here</Text>
         </View>
       ) : (
-        alertHistory.map((alert) => (
-          <View key={alert.id} style={styles.historyCard}>
+        alertHistory.map((alert, idx) => (
+          <View key={alert.id ?? `alert-${idx}-${alert.timestamp?.getTime() ?? idx}`} style={styles.historyCard}>
             <View style={styles.historyIcon}>
               <Ionicons 
                 name={alert.status === 'resolved' || alert.status === 'cancelled' ? 'checkmark-circle' : 'alert-circle'} 
@@ -1004,6 +1159,18 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 16,
     textAlign: 'center',
+  },
+  relationshipOptions: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  relationshipOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   warningCard: {
     flexDirection: 'row',
@@ -1194,6 +1361,11 @@ const styles = StyleSheet.create({
   contactPhone: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  contactRelationship: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 4,
   },
   primaryBadge: {
     backgroundColor: '#DBEAFE',

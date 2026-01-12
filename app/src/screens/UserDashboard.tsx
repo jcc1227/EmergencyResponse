@@ -16,11 +16,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadContactsLocal, saveContactsLocal, addContact, updateContact, deleteContact, syncContactsFromServer, ContactRecord } from '../services/contacts';
 
 const { width } = Dimensions.get('window');
 
-// Use your computer's local IP address for Expo Go
-const API_URL = 'http://192.168.1.10:5000/api';
+import API_URL from '../config/api';
 
 // GPS update interval in milliseconds
 const GPS_UPDATE_INTERVAL = 5000; // Update every 5 seconds
@@ -42,6 +42,7 @@ interface Contact {
   name: string;
   phone: string;
   isPrimary: boolean;
+  relationship?: string;
 }
 
 interface AlertHistory {
@@ -221,10 +222,16 @@ export default function UserDashboard({ email, onLogout }: Props) {
 
   const loadContacts = async () => {
     try {
-      const storedContacts = await AsyncStorage.getItem('contacts');
-      if (storedContacts) {
-        setContacts(JSON.parse(storedContacts));
+      // Try to sync from server if we have a userId
+      if (userId) {
+        const synced = await syncContactsFromServer(userId);
+        if (synced) {
+          setContacts(synced as Contact[]);
+          return;
+        }
       }
+      const stored = await loadContactsLocal();
+      setContacts(stored as Contact[]);
     } catch (error) {
       console.error('Error loading contacts:', error);
     }
@@ -232,7 +239,7 @@ export default function UserDashboard({ email, onLogout }: Props) {
 
   const saveContacts = async (newContacts: Contact[]) => {
     try {
-      await AsyncStorage.setItem('contacts', JSON.stringify(newContacts));
+      await saveContactsLocal(newContacts as ContactRecord[]);
     } catch (error) {
       console.error('Error saving contacts:', error);
     }

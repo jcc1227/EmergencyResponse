@@ -93,23 +93,57 @@ router.patch('/:id/location', async (req, res) => {
 
     const now = new Date();
     
-    const alert = await Alert.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: {
-          location: { latitude, longitude, accuracy, address: address || 'Location updating...' },
-          lastLocationUpdate: now,
-          isOnline: true,
-        },
-        $push: {
-          locationHistory: {
-            $each: [{ latitude, longitude, timestamp: now, accuracy }],
-            $slice: -100, // Keep only last 100 location points
+    // Try update, with a single retry for transient MongoNetworkError (ECONNRESET)
+    let alert = null;
+    try {
+      alert = await Alert.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            location: { latitude, longitude, accuracy, address: address || 'Location updating...' },
+            lastLocationUpdate: now,
+            isOnline: true,
+          },
+          $push: {
+            locationHistory: {
+              $each: [{ latitude, longitude, timestamp: now, accuracy }],
+              $slice: -100, // Keep only last 100 location points
+            },
           },
         },
-      },
-      { new: true }
-    ).lean();
+        { new: true }
+      ).lean();
+    } catch (err: any) {
+      console.error('Location update DB error (first attempt):', err && err.message);
+      // If transient network error, wait briefly and retry once
+      if (err && (err.name === 'MongoNetworkError' || err.message && err.message.includes('ECONNRESET'))) {
+        try {
+          await new Promise((r) => setTimeout(r, 250));
+          alert = await Alert.findByIdAndUpdate(
+            req.params.id,
+            {
+              $set: {
+                location: { latitude, longitude, accuracy, address: address || 'Location updating...' },
+                lastLocationUpdate: now,
+                isOnline: true,
+              },
+              $push: {
+                locationHistory: {
+                  $each: [{ latitude, longitude, timestamp: now, accuracy }],
+                  $slice: -100,
+                },
+              },
+            },
+            { new: true }
+          ).lean();
+        } catch (err2: any) {
+          console.error('Location update DB error (retry failed):', err2);
+          throw err2;
+        }
+      } else {
+        throw err;
+      }
+    }
 
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });

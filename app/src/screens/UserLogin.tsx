@@ -15,9 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Use your computer's local IP address for the mobile app to connect to the backend
-// Find your IP: Windows - ipconfig, Mac/Linux - ifconfig
-const API_URL = 'http://192.168.1.10:5000/api';
+import API_URL from '../config/api';
 
 interface Props {
   onLogin: (email: string, token: string) => void;
@@ -128,7 +126,7 @@ export default function UserLogin({ onLogin }: Props) {
               <View style={styles.logoContainer}>
                 <Ionicons name="shield-checkmark" size={50} color="#FFF" />
               </View>
-              <Text style={styles.appName}>SafeAlert</Text>
+              <Text style={styles.appName}>ResQ Tap</Text>
               <Text style={styles.tagline}>
                 {isSignup ? 'Create your account' : 'Your safety, our priority'}
               </Text>
@@ -142,7 +140,7 @@ export default function UserLogin({ onLogin }: Props) {
               <Text style={styles.formSubtitle}>
                 {isSignup 
                   ? 'Fill in your details to get started' 
-                  : 'Log in to your SafeAlert account'}
+                  : 'Log in to your ResQ Tap account'}
               </Text>
 
               {/* Alert Messages */}

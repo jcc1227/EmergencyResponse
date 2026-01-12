@@ -1,20 +1,15 @@
 import { Router } from 'express';
-import { User } from '../models/index.js';
+import { User, Contact } from '../models/index.js';
 
 const router = Router();
 
 // Get user contacts
 router.get('/:userId', async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId).select('contacts').lean();
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json({
-      contacts: user.contacts || [],
-    });
+    const userId = req.params.userId;
+    // Return contacts from the dedicated Contact collection
+    const contacts = await Contact.find({ userId }).sort({ createdAt: -1 }).lean();
+    res.json({ contacts: contacts || [] });
   } catch (error) {
     console.error('Get contacts error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -24,37 +19,29 @@ router.get('/:userId', async (req, res) => {
 // Add a contact
 router.post('/:userId', async (req, res) => {
   try {
-    const { name, phone, isPrimary } = req.body;
+    const { name, phone, isPrimary, relationship } = req.body;
+    const userId = req.params.userId;
 
     if (!name || !phone) {
       return res.status(400).json({ error: 'Name and phone are required' });
     }
 
-    const user = await User.findById(req.params.userId);
-    
+    // Ensure user exists
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // If setting as primary, unset other primary contacts
+    // If primary, unset other primary contacts for this user
     if (isPrimary) {
-      user.contacts.forEach(contact => {
-        contact.isPrimary = false;
-      });
+      await Contact.updateMany({ userId }, { $set: { isPrimary: false } });
     }
 
-    user.contacts.push({
-      name,
-      phone,
-      isPrimary: isPrimary || false,
-    });
+    const created = await Contact.create({ userId, name, phone, isPrimary: !!isPrimary, relationship });
 
-    await user.save();
+    const contacts = await Contact.find({ userId }).sort({ createdAt: -1 }).lean();
 
-    res.status(201).json({
-      message: 'Contact added successfully',
-      contacts: user.contacts,
-    });
+    res.status(201).json({ message: 'Contact added successfully', contacts });
   } catch (error) {
     console.error('Add contact error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -62,38 +49,29 @@ router.post('/:userId', async (req, res) => {
 });
 
 // Update a contact
-router.patch('/:userId/:contactIndex', async (req, res) => {
+router.patch('/:userId/:contactId', async (req, res) => {
   try {
-    const { name, phone, isPrimary } = req.body;
-    const contactIndex = parseInt(req.params.contactIndex);
+    const { name, phone, isPrimary, relationship } = req.body;
+    const { userId, contactId } = req.params;
 
-    const user = await User.findById(req.params.userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    // Ensure contact exists and belongs to user
+    const contact = await Contact.findOne({ _id: contactId, userId });
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
-    if (contactIndex < 0 || contactIndex >= user.contacts.length) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    // If setting as primary, unset other primary contacts
     if (isPrimary) {
-      user.contacts.forEach(contact => {
-        contact.isPrimary = false;
-      });
+      await Contact.updateMany({ userId }, { $set: { isPrimary: false } });
     }
 
-    if (name) user.contacts[contactIndex].name = name;
-    if (phone) user.contacts[contactIndex].phone = phone;
-    if (isPrimary !== undefined) user.contacts[contactIndex].isPrimary = isPrimary;
+    if (name !== undefined) contact.name = name;
+    if (phone !== undefined) contact.phone = phone;
+    if (relationship !== undefined) contact.relationship = relationship;
+    if (isPrimary !== undefined) contact.isPrimary = !!isPrimary;
 
-    await user.save();
+    await contact.save();
 
-    res.json({
-      message: 'Contact updated successfully',
-      contacts: user.contacts,
-    });
+    const contacts = await Contact.find({ userId }).sort({ createdAt: -1 }).lean();
+
+    res.json({ message: 'Contact updated successfully', contacts });
   } catch (error) {
     console.error('Update contact error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -101,27 +79,18 @@ router.patch('/:userId/:contactIndex', async (req, res) => {
 });
 
 // Delete a contact
-router.delete('/:userId/:contactIndex', async (req, res) => {
+router.delete('/:userId/:contactId', async (req, res) => {
   try {
-    const contactIndex = parseInt(req.params.contactIndex);
+    const { userId, contactId } = req.params;
 
-    const user = await User.findById(req.params.userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    const contact = await Contact.findOne({ _id: contactId, userId });
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
-    if (contactIndex < 0 || contactIndex >= user.contacts.length) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
+    await Contact.deleteOne({ _id: contactId });
 
-    user.contacts.splice(contactIndex, 1);
-    await user.save();
+    const contacts = await Contact.find({ userId }).sort({ createdAt: -1 }).lean();
 
-    res.json({
-      message: 'Contact deleted successfully',
-      contacts: user.contacts,
-    });
+    res.json({ message: 'Contact deleted successfully', contacts });
   } catch (error) {
     console.error('Delete contact error:', error);
     res.status(500).json({ error: 'Internal server error' });

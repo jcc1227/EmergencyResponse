@@ -1,4 +1,4 @@
-# SafeAlert - Emergency Response System
+# ResQ Tap - Emergency Response System
 
 A 3-layer emergency response system with separate applications for Users (mobile) and Responders (web).
 

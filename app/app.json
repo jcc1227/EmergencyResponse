@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "SafeAlert",
-    "slug": "safealert-app",
+    "name": "ResQ Tap",
+    "slug": "resq-tap-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -14,20 +14,24 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.safealert.app",
+      "bundleIdentifier": "com.resqtap.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "SafeAlert needs your location to send accurate emergency alerts.",
-        "NSLocationAlwaysUsageDescription": "SafeAlert needs your location to send accurate emergency alerts even when the app is in the background."
+        "NSLocationWhenInUseUsageDescription": "ResQ Tap needs your location to send accurate emergency alerts.",
+        "NSLocationAlwaysUsageDescription": "ResQ Tap needs your location to send accurate emergency alerts even when the app is in the background."
       }
     },
     "android": {
-      "package": "com.safealert.app",
+      "package": "com.resqtap.app",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
+    }
+    ,
+    "extra": {
+      "API_URL": "http://192.168.11.154:5000/api"
     }
   }
 }

@@ -1,0 +1,5 @@
+build:
+  android:
+    release:
+      workflow: managed
+      buildType: apk
